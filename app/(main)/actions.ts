@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { getPrisma } from "@/lib/db";
-import { createTaskSchema, taskActionStateSchema, taskIdSchema } from "@/lib/validations/task";
+import {
+  createTaskSchema,
+  taskActionStateSchema,
+  taskIdSchema,
+} from "@/lib/validations/task";
 
 export type TaskActionState = {
   error?: string;
@@ -28,10 +32,9 @@ export async function createTask(
     await getPrisma().task.create({
       data: parsed.data,
     });
-  } catch {
-    return {
-      error: "Unable to save the task right now.",
-    };
+  } catch (error) {
+    console.error(error);
+    return { error: "Unable to save task." };
   }
 
   revalidatePath("/");

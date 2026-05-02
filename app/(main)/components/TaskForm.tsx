@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-const initialState: TaskActionState = {};
+const initialState: TaskActionState = { success: false };
 
 function SubmitButton() {
   const { pending } = useFormStatus();

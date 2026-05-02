@@ -22,6 +22,6 @@ export const createTaskSchema = z.object({
 export const taskIdSchema = z.string().uuid("Invalid task identifier.");
 
 export const taskActionStateSchema = z.object({
+  success: z.boolean(),
   error: z.string().optional(),
-  success: z.boolean().optional(),
 });

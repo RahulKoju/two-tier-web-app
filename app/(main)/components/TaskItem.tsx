@@ -20,10 +20,10 @@ export function TaskItem({ task }: TaskItemProps) {
     setError(null);
 
     startTransition(async () => {
-      try {
-        await toggleTask(task.id, checked);
-      } catch (toggleError) {
-        setError(toggleError instanceof Error ? toggleError.message : "Unable to update task.");
+      const result = await toggleTask(task.id, checked);
+
+      if (!result.success) {
+        setError(result.error ?? "Unable to update task.");
       }
     });
   };
@@ -32,10 +32,10 @@ export function TaskItem({ task }: TaskItemProps) {
     setError(null);
 
     startTransition(async () => {
-      try {
-        await deleteTask(task.id);
-      } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : "Unable to delete task.");
+      const result = await deleteTask(task.id);
+
+      if (!result.success) {
+        setError(result.error ?? "Unable to delete task.");
       }
     });
   };

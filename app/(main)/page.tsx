@@ -1,6 +1,7 @@
 import { TaskForm } from "@/app/(main)/components/TaskForm";
 import { TaskList } from "@/app/(main)/components/TaskList";
 import { getPrisma } from "@/lib/db";
+import { createLoggedServerError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,17 +11,22 @@ export const metadata = {
 };
 
 async function getTasks() {
-  const tasks = await getPrisma().task.findMany({
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  try {
+    const tasks = await getPrisma().task.findMany({
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
-  return tasks.map((task) => ({
-    ...task,
-    createdAt: task.createdAt.toISOString(),
-    updatedAt: task.updatedAt.toISOString(),
-  }));
+    return tasks.map((task) => ({
+      ...task,
+      createdAt: task.createdAt.toISOString(),
+      updatedAt: task.updatedAt.toISOString(),
+    }));
+  } catch (error) {
+    console.error(error);
+    throw createLoggedServerError("Unable to load tasks right now.", error);
+  }
 }
 
 export default async function TaskPage() {

@@ -2,12 +2,14 @@ import { TaskForm } from "@/app/(main)/components/TaskForm";
 import { TaskList } from "@/app/(main)/components/TaskList";
 import { getPrisma } from "@/lib/db";
 import { createLoggedServerError } from "@/lib/errors";
+import type { Task } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Task Tracker",
-  description: "Minimal task tracker built with Next.js, Prisma, and PostgreSQL.",
+  description:
+    "Minimal task tracker built with Next.js, Prisma, and PostgreSQL.",
 };
 
 async function getTasks() {
@@ -18,7 +20,7 @@ async function getTasks() {
       },
     });
 
-    return tasks.map((task) => ({
+    return tasks.map((task: Task) => ({
       ...task,
       createdAt: task.createdAt.toISOString(),
       updatedAt: task.updatedAt.toISOString(),
@@ -36,10 +38,12 @@ export default async function TaskPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-10 sm:px-6">
       <section className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Task Tracker</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          Task Tracker
+        </h1>
         <p className="text-sm text-slate-600">
-          Server-rendered task management with Prisma, PostgreSQL, and minimal client
-          interactivity.
+          Server-rendered task management with Prisma, PostgreSQL, and minimal
+          client interactivity.
         </p>
       </section>
 

@@ -2,7 +2,6 @@ import { TaskForm } from "@/app/(main)/components/TaskForm";
 import { TaskList } from "@/app/(main)/components/TaskList";
 import { getPrisma } from "@/lib/db";
 import { createLoggedServerError } from "@/lib/errors";
-import type { Task } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +19,7 @@ async function getTasks() {
       },
     });
 
-    return tasks.map((task: Task) => ({
+    return tasks.map((task) => ({
       ...task,
       createdAt: task.createdAt.toISOString(),
       updatedAt: task.updatedAt.toISOString(),

@@ -11,6 +11,7 @@ COPY pnpm-lock.yaml pnpm-lock.yaml
 RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN apk add --no-cache postgresql-client
 RUN pnpm install
+RUN npx prisma generate
 
 COPY . .
 

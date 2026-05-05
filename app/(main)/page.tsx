@@ -6,9 +6,9 @@ import { createLoggedServerError } from "@/lib/errors";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Task Tracker",
+  title: "System Overview",
   description:
-    "Minimal task tracker built with Next.js, Prisma, and PostgreSQL.",
+    "Production-style two-tier web application with Next.js, Prisma, PostgreSQL, Docker Compose, Jenkins CI/CD, Nginx, SSL, and systemd-backed deployment.",
 };
 
 async function getTasks() {
@@ -38,11 +38,12 @@ export default async function TaskPage() {
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-10 sm:px-6">
       <section className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-          Task Tracker
+          Two-Tier Web App
         </h1>
         <p className="text-sm text-slate-600">
-          Server-rendered task management with Prisma, PostgreSQL, and minimal
-          client interactivity.
+          Production-style two-tier web application deployed on AWS EC2 with
+          Next.js 16, Prisma, PostgreSQL, Docker Compose, Jenkins CI/CD, Nginx
+          reverse proxy, Certbot SSL, and systemd auto-start.
         </p>
       </section>
 

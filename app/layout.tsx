@@ -3,10 +3,23 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Task Tracker",
-    template: "%s | Task Tracker",
+    default: "Two-Tier Web App",
+    template: "%s | Two-Tier Web App",
   },
-  description: "Minimal task tracker built with Next.js, Prisma, PostgreSQL, and Zod.",
+  applicationName: "Two-Tier Web App",
+  description:
+    "Production-style two-tier web application deployed on AWS EC2 with Next.js, Prisma, PostgreSQL, Docker Compose, Jenkins CI/CD, Nginx, Certbot SSL, and systemd auto-start.",
+  keywords: [
+    "Next.js",
+    "Prisma",
+    "PostgreSQL",
+    "Docker Compose",
+    "Jenkins",
+    "Nginx",
+    "Certbot",
+    "AWS EC2",
+    "systemd",
+  ],
 };
 
 export default function RootLayout({

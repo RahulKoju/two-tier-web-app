@@ -177,7 +177,6 @@ pipeline {
         }
         success {
             echo 'Deployment successful!'
-            sh "docker image prune -f --filter 'until=24h'" echo 'Deployment successful.'
 
             sh '''
                 echo "Pruning old dangling images..."

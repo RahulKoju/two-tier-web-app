@@ -18,10 +18,10 @@ services:
     restart: unless-stopped
 
   migrate:
+    image: two-tier-web-app:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: two-tier-migrate
     command: npx prisma migrate deploy
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
@@ -30,6 +30,7 @@ services:
         condition: service_healthy
 
   app:
+    image: two-tier-web-app:latest
     build:
       context: .
       dockerfile: Dockerfile

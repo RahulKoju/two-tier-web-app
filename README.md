@@ -184,13 +184,14 @@ The `Jenkinsfile` runs these stages in order:
 - Runs:
 
 ```bash
-docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+docker compose build app
+docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${IMAGE_TAG}
 ```
 
-- Builds the application image from the repository `Dockerfile`
-- Tags the same image with the current Jenkins `BUILD_NUMBER`
-- Tags the same image again as `latest`
+- Builds the `app` service image from the repository `Dockerfile`
+- Produces `two-tier-web-app:latest` through the Compose build
+- Tags that built image with the current Jenkins `BUILD_NUMBER`
+- Prints matching Docker images for verification
 
 ### Run Migrations
 
@@ -200,7 +201,12 @@ docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
 docker compose up -d db
 ```
 
-- Polls PostgreSQL readiness from inside the running DB container until `pg_isready` succeeds
+- Polls PostgreSQL readiness from inside the running DB container until this succeeds:
+
+```bash
+docker compose exec db pg_isready -h localhost -p 5432
+```
+
 - Runs the migration container:
 
 ```bash
@@ -212,19 +218,16 @@ docker compose run --rm migrate
 - Stops the running Compose deployment:
 
 ```bash
-docker compose down
+docker compose up -d --no-deps --force-recreate app
 ```
 
-- Starts the application service:
-
-```bash
-docker compose up -d app
-```
+- Recreates only the `app` service from the newly built image
+- Leaves the database container running during application rollout
 
 ### Verify
 
 - Waits for the app container `two-tier-web-app` to reach Docker health status `healthy`
-- Retries up to 10 times with 10-second intervals
+- Retries up to 12 times with 10-second intervals
 - Fails the deployment if the healthcheck never becomes healthy
 - Runs:
 
@@ -238,16 +241,15 @@ docker compose ps
 
 - On failure:
   - prints `Pipeline failed! Attempting rollback...`
+  - recreates `.env` from Jenkins credentials before rollback
   - sets `PREV_IMAGE` to `two-tier-web-app:<BUILD_NUMBER - 1>`
   - checks whether that previous image exists locally with `docker image inspect`
-  - stops the current `two-tier-web-app` container if it exists
-  - removes the current `two-tier-web-app` container if it exists
-  - starts a replacement container from the previous image on Docker network `two-tier-web-app_default`
-  - rebinds host port `3001` to container port `3000`
-  - injects `DATABASE_URL` for the rollback container at runtime
-  - applies `--restart unless-stopped` to the rollback container
-  - prints `Rollback complete` when the previous image is started successfully
-  - prints `No previous image found, cannot rollback` when no earlier tagged image exists
+  - retags the previous image as `two-tier-web-app:latest`
+  - starts `db` with `docker compose up -d db`
+  - recreates `app` with `docker compose up -d --no-deps --force-recreate app`
+  - verifies rollback health with the same Docker health polling loop
+  - prints `No previous image found. Cannot rollback.` when no earlier tagged image exists
+  - prints final Compose status with `docker compose ps`
   - runs `docker compose logs app`
 - On success:
   - prints `Deployment successful!`
@@ -266,7 +268,7 @@ docker compose ps
   - `db` starts and initializes PostgreSQL if the volume does not already contain data
   - Compose waits for the `db` healthcheck before allowing dependent services to proceed
   - `migrate` runs only when explicitly invoked by the deployment flow
-  - `app` starts with `pnpm start` through `start.sh`
+  - `app` starts with `pnpm start` through `scripts/start.sh`
   - Docker marks the app healthy only after the container responds on `http://localhost:3000`
   - Nginx serves HTTPS and forwards requests to the app on `localhost:3001`
 - The application becomes publicly available only after:
@@ -290,7 +292,7 @@ docker compose ps
 ### If the App Fails Health Verification
 
 - Jenkins polls Docker health status for container `two-tier-web-app`
-- If the container never becomes healthy within the retry window, the verify stage fails
+- If the container never becomes healthy within 12 checks at 10-second intervals, the verify stage fails
 - The pipeline enters the failure block and attempts rollback to the previous tagged image
 
 ### If the App Crashes

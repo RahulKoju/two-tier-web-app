@@ -28,6 +28,20 @@ Production-style two-tier web application deployed on AWS EC2 with Next.js 16, P
   - `db` → PostgreSQL
   - `migrate` → one-off Prisma migration runner
 
+## Docker Image Naming Strategy
+
+- `two-tier-web-app:latest` is the active application image used by Docker Compose.
+- `two-tier-web-app:<BUILD_NUMBER>` is the versioned Jenkins tag used for traceability and rollback.
+- The `app` and `migrate` services both use the same application image, so the code used for migrations and the code used for the running site stay aligned.
+- In `docker-compose.yml`, both services must keep:
+
+```yaml
+image: two-tier-web-app:latest
+```
+
+- The `build:` block remains under `app` and `migrate` so Compose can still build from the project `Dockerfile`.
+- This image naming strategy matters because Jenkins and Docker Compose must point to the same image tag. If they do not, Jenkins can finish successfully while the live container still runs older code.
+
 ## Service Responsibilities
 
 ### App Container
@@ -59,7 +73,7 @@ pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
 
 ### Migrate Container
 
-- Uses the same application image build context
+- Uses the same application image as `app`, `two-tier-web-app:latest`
 - Runs:
 
 ```bash
@@ -116,8 +130,8 @@ postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
 1. Build the application image:
 
 ```bash
-docker build -t two-tier-web-app:<tag> .
-docker tag two-tier-web-app:<tag> two-tier-web-app:latest
+docker compose build app
+docker tag two-tier-web-app:latest two-tier-web-app:<tag>
 ```
 
 2. Start PostgreSQL:
@@ -153,14 +167,22 @@ docker compose ps
 - Git push updates the repository tracked by Jenkins.
 - Jenkins checks out the latest source.
 - Jenkins creates a runtime `.env` file from stored credentials.
-- Jenkins builds a tagged Docker image for the current build and also tags it as `latest`.
+- Jenkins builds the Compose `app` image, which produces `two-tier-web-app:latest`.
+- Jenkins tags `two-tier-web-app:latest` as `two-tier-web-app:<BUILD_NUMBER>`.
 - Jenkins starts the database container.
 - Jenkins waits until PostgreSQL is ready to accept connections.
 - Jenkins runs the migration container.
-- Jenkins stops the current deployment and starts the updated application container.
+- Jenkins force-recreates only the `app` container with Docker Compose.
 - Jenkins waits until the app container healthcheck reports healthy.
 - Jenkins verifies the resulting Compose state.
-- If deployment verification fails, Jenkins attempts rollback to the previous image tag.
+- If deployment verification fails, Jenkins retags the previous build image as `latest` and recreates the app through Docker Compose.
+
+This separation keeps responsibilities clear:
+
+- Jenkins handles build, deployment orchestration, health verification, and rollback decisions.
+- Docker Compose defines and runs the `db`, `migrate`, and `app` services.
+- Nginx provides the public HTTPS entrypoint and forwards traffic to the app container on host port `3001`.
+- systemd restores the Compose deployment after server reboot.
 
 ## CI/CD Pipeline Breakdown
 
@@ -191,6 +213,7 @@ docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${IMAGE_TAG}
 - Builds the `app` service image from the repository `Dockerfile`
 - Produces `two-tier-web-app:latest` through the Compose build
 - Tags that built image with the current Jenkins `BUILD_NUMBER`
+- Keeps the Compose runtime image and the Jenkins-tagged image aligned
 - Prints matching Docker images for verification
 
 ### Run Migrations
@@ -215,7 +238,7 @@ docker compose run --rm migrate
 
 ### Deploy
 
-- Stops the running Compose deployment:
+- Runs:
 
 ```bash
 docker compose up -d --no-deps --force-recreate app
@@ -247,6 +270,7 @@ docker compose ps
   - retags the previous image as `two-tier-web-app:latest`
   - starts `db` with `docker compose up -d db`
   - recreates `app` with `docker compose up -d --no-deps --force-recreate app`
+  - keeps rollback inside Docker Compose instead of switching to a raw `docker run` path
   - verifies rollback health with the same Docker health polling loop
   - prints `No previous image found. Cannot rollback.` when no earlier tagged image exists
   - prints final Compose status with `docker compose ps`
@@ -293,7 +317,7 @@ docker compose ps
 
 - Jenkins polls Docker health status for container `two-tier-web-app`
 - If the container never becomes healthy within 12 checks at 10-second intervals, the verify stage fails
-- The pipeline enters the failure block and attempts rollback to the previous tagged image
+- The pipeline enters the failure block, retags the previous Jenkins image as `two-tier-web-app:latest`, and recreates the app with Docker Compose
 
 ### If the App Crashes
 
@@ -321,7 +345,26 @@ docker compose ps
   - Docker starts first
   - systemd runs `docker compose up -d db app`
   - PostgreSQL and the application are restored from the last deployed Compose configuration
-- This reboot path starts `db` and `app` only. It does not run the `migrate` container automatically.
+- This reboot path is only for reboot recovery. It starts `db` and `app` only.
+- It does not run the `migrate` container automatically.
+- Jenkins remains responsible for running migrations during normal deployments.
+
+## Troubleshooting Deployment Image Mismatch
+
+- If the website does not show the latest deployed code, first confirm which images exist:
+
+```bash
+docker images
+```
+
+- Then confirm which image the running containers are actually using:
+
+```bash
+docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+```
+
+- Check that the running application container is using `two-tier-web-app:latest`.
+- If the running container image name does not match `two-tier-web-app:latest`, the active Compose deployment is not using the expected application image.
 
 ## Security and Environment Handling
 

@@ -50,7 +50,7 @@ image: two-tier-web-app:latest
 - Installs dependencies with `pnpm`
 - Generates Prisma client during image build
 - Builds the production Next.js application during image build
-- Receives a container healthcheck that probes `http://localhost:3000`
+- Receives a container healthcheck that probes `http://localhost:3000/api/health`
 - Starts at runtime through `scripts/start.sh`
 - Runs `pnpm start` and listens on container port `3000`
 - Published on host port `3001` through `3001:3000`
@@ -89,7 +89,7 @@ npx prisma migrate deploy
 - `db` starts first and initializes PostgreSQL with the runtime credentials from `.env`.
 - `migrate` waits on `db` health, connects to `db:5432`, and applies the committed Prisma migrations.
 - `app` waits on `db` health, starts the production Next.js server, and reads `DATABASE_URL` at runtime.
-- `app` reports healthy only after its HTTP healthcheck succeeds.
+- `app` reports healthy only after its `/api/health` endpoint returns success.
 - `app` and `migrate` both use:
 
 ```text
@@ -170,12 +170,12 @@ docker compose ps
 - Jenkins builds the Compose `app` image, which produces `two-tier-web-app:latest`.
 - Jenkins tags `two-tier-web-app:latest` as `two-tier-web-app:<BUILD_NUMBER>`.
 - Jenkins starts the database container.
-- Jenkins waits until PostgreSQL is ready to accept connections.
+- Jenkins waits until PostgreSQL reaches Docker health status `healthy`.
 - Jenkins runs the migration container.
 - Jenkins force-recreates only the `app` container with Docker Compose.
 - Jenkins waits until the app container healthcheck reports healthy.
 - Jenkins verifies the resulting Compose state.
-- If deployment verification fails, Jenkins retags the previous build image as `latest` and recreates the app through Docker Compose.
+- If deployment verification fails, Jenkins retags the last known-good image as `latest` and recreates the app through Docker Compose.
 
 This separation keeps responsibilities clear:
 
@@ -224,10 +224,10 @@ docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${IMAGE_TAG}
 docker compose up -d db
 ```
 
-- Polls PostgreSQL readiness from inside the running DB container until this succeeds:
+- Polls the DB container health status until Docker reports `healthy`:
 
 ```bash
-docker compose exec db pg_isready -h localhost -p 5432
+docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' $(docker compose ps -q db)
 ```
 
 - Runs the migration container:
@@ -252,6 +252,7 @@ docker compose up -d --no-deps --force-recreate app
 - Waits for the app container `two-tier-web-app` to reach Docker health status `healthy`
 - Retries up to 12 times with 10-second intervals
 - Fails the deployment if the healthcheck never becomes healthy
+- The app healthcheck succeeds only when `GET /api/health` can reach PostgreSQL and `SELECT 1` succeeds
 - Runs:
 
 ```bash
@@ -265,18 +266,19 @@ docker compose ps
 - On failure:
   - prints `Pipeline failed! Attempting rollback...`
   - recreates `.env` from Jenkins credentials before rollback
-  - sets `PREV_IMAGE` to `two-tier-web-app:<BUILD_NUMBER - 1>`
-  - checks whether that previous image exists locally with `docker image inspect`
-  - retags the previous image as `two-tier-web-app:latest`
+  - reads the rollback target from `.rollback-image`, copied from the previous successful deployment marker
+  - checks whether that last known-good image exists locally with `docker image inspect`
+  - retags the last known-good image as `two-tier-web-app:latest`
   - starts `db` with `docker compose up -d db`
   - recreates `app` with `docker compose up -d --no-deps --force-recreate app`
   - keeps rollback inside Docker Compose instead of switching to a raw `docker run` path
   - verifies rollback health with the same Docker health polling loop
-  - prints `No previous image found. Cannot rollback.` when no earlier tagged image exists
+  - prints `No last-known-good image found. Cannot rollback.` when no rollback marker exists
   - prints final Compose status with `docker compose ps`
   - runs `docker compose logs app`
 - On success:
   - prints `Deployment successful!`
+  - records `${IMAGE_NAME}:${IMAGE_TAG}` in `.last-known-good-image`
   - prunes Docker images older than 24 hours
 
 ## Runtime Behavior
@@ -293,7 +295,7 @@ docker compose ps
   - Compose waits for the `db` healthcheck before allowing dependent services to proceed
   - `migrate` runs only when explicitly invoked by the deployment flow
   - `app` starts with `pnpm start` through `scripts/start.sh`
-  - Docker marks the app healthy only after the container responds on `http://localhost:3000`
+  - Docker marks the app healthy only after `/api/health` returns HTTP 200
   - Nginx serves HTTPS and forwards requests to the app on `localhost:3001`
 - The application becomes publicly available only after:
   - the app container is running
@@ -317,7 +319,7 @@ docker compose ps
 
 - Jenkins polls Docker health status for container `two-tier-web-app`
 - If the container never becomes healthy within 12 checks at 10-second intervals, the verify stage fails
-- The pipeline enters the failure block, retags the previous Jenkins image as `two-tier-web-app:latest`, and recreates the app with Docker Compose
+- The pipeline enters the failure block, retags the last known-good image as `two-tier-web-app:latest`, and recreates the app with Docker Compose
 
 ### If the App Crashes
 
@@ -329,6 +331,51 @@ docker compose ps
 
 - The `db` service uses `restart: unless-stopped`
 - Docker restarts the container automatically unless it was intentionally stopped
+
+## App Healthcheck
+
+- `GET /api/health` is the application readiness endpoint.
+- It returns `200` when the Next.js server is reachable and Prisma can execute `SELECT 1` against PostgreSQL.
+- It returns `503` when the app process is running but database connectivity fails.
+- Docker Compose uses this endpoint for the `app` container healthcheck.
+
+## Manual Failure Drills
+
+### Kill the app container
+
+```bash
+docker compose kill app
+docker compose ps
+```
+
+- Expected result: Docker restarts `app` because of `restart: unless-stopped`, and health returns to `healthy`.
+
+### Stop the DB container
+
+```bash
+docker compose stop db
+docker compose ps
+curl -i http://localhost:3001/api/health
+```
+
+- Expected result: `/api/health` returns `503`, the app healthcheck turns unhealthy, and task operations fail with the existing safe DB error handling.
+
+### Break DB connectivity for the app
+
+```bash
+POSTGRES_PASSWORD=wrong-password docker compose up -d --no-deps --force-recreate app
+curl -i http://localhost:3001/api/health
+```
+
+- Expected result: the app process comes up with bad DB credentials, `/api/health` returns `503`, and Jenkins verification would fail for the same condition.
+
+### Validate rollback
+
+1. Leave the last successful deployment marker in place.
+2. Deploy a bad app image or a bad app DB configuration so Verify fails.
+3. Inspect the Jenkins post-failure logs.
+
+- Expected result: Jenkins retags the image stored in `.rollback-image`, recreates `app`, and the container returns to `healthy`.
 
 ### On Server Reboot
 

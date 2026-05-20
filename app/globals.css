@@ -25,3 +25,79 @@ body {
   color: var(--foreground);
   font-family: "Segoe UI", Arial, Helvetica, sans-serif;
 }
+
+.task-description p + p,
+.task-description ul + p,
+.task-description ol + p,
+.task-description p + ul,
+.task-description p + ol,
+.task-description ul + ol,
+.task-description ol + ul {
+  margin-top: 0.5rem;
+}
+
+.task-description ul,
+.task-description ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.task-description li + li {
+  margin-top: 0.25rem;
+}
+
+.task-description ul {
+  list-style-type: disc;
+}
+
+.task-description ol {
+  list-style-type: decimal;
+}
+
+.task-description a {
+  color: #0f172a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.task-description strong {
+  font-weight: 600;
+}
+
+.task-description em {
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror p + p,
+.tiptap-editor .ProseMirror ul + p,
+.tiptap-editor .ProseMirror ol + p,
+.tiptap-editor .ProseMirror p + ul,
+.tiptap-editor .ProseMirror p + ol,
+.tiptap-editor .ProseMirror ul + ol,
+.tiptap-editor .ProseMirror ol + ul {
+  margin-top: 0.5rem;
+}
+
+.tiptap-editor .ProseMirror ul,
+.tiptap-editor .ProseMirror ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.tiptap-editor .ProseMirror ul {
+  list-style-type: disc;
+}
+
+.tiptap-editor .ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.tiptap-editor .ProseMirror li + li {
+  margin-top: 0.25rem;
+}
+
+.tiptap-editor .ProseMirror a {
+  color: #0f172a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

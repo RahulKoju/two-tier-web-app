@@ -15,7 +15,29 @@ RUN npx prisma generate
 
 RUN pnpm build
 
-# Stage 2: Production runner
+# Stage 2: Migration runner
+FROM node:22-alpine AS migrator
+
+WORKDIR /app
+
+# Prisma CLI and its engine binaries
+COPY --from=builder /app/node_modules/.bin/prisma       ./node_modules/.bin/prisma
+COPY --from=builder /app/node_modules/prisma            ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma           ./node_modules/@prisma
+
+# pnpm hoisted copies (CLI resolves through these)
+COPY --from=builder /app/node_modules/.pnpm             ./node_modules/.pnpm
+
+# Schema and config files
+COPY --from=builder /app/prisma                         ./prisma
+COPY --from=builder /app/prisma.config.ts               ./prisma.config.ts
+COPY --from=builder /app/package.json                   ./package.json
+
+ENV PATH="/app/node_modules/.bin:$PATH"
+
+CMD ["prisma", "migrate", "deploy"]
+
+# Stage 3: Production runner
 FROM node:22-alpine AS runner
 
 WORKDIR /app

@@ -98,21 +98,27 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                sh '''
-                    if [ -f "${LAST_KNOWN_GOOD_FILE}" ]; then
-                        cp "${LAST_KNOWN_GOOD_FILE}" "${ROLLBACK_IMAGE_FILE}"
-                        echo "Saved rollback target: $(cat "${ROLLBACK_IMAGE_FILE}")"
-                    else
-                        rm -f "${ROLLBACK_IMAGE_FILE}"
-                        echo "No last-known-good image marker found. Rollback target is unavailable for this run."
-                    fi
+                withCredentials([
+                    string(credentialsId: 'POSTGRES_USER', variable: 'POSTGRES_USER'),
+                    string(credentialsId: 'POSTGRES_PASSWORD', variable: 'POSTGRES_PASSWORD'),
+                    string(credentialsId: 'POSTGRES_DB', variable: 'POSTGRES_DB')
+                ]) {
+                    sh '''
+                        if [ -f "${LAST_KNOWN_GOOD_FILE}" ]; then
+                            cp "${LAST_KNOWN_GOOD_FILE}" "${ROLLBACK_IMAGE_FILE}"
+                            echo "Saved rollback target: $(cat "${ROLLBACK_IMAGE_FILE}")"
+                        else
+                            rm -f "${ROLLBACK_IMAGE_FILE}"
+                            echo "No last-known-good image marker found. Rollback target is unavailable for this run."
+                        fi
 
-                    echo "Deploying app container..."
+                        echo "Deploying app container..."
 
-                    docker compose up -d --no-deps --force-recreate app
+                        docker compose up -d --no-deps --force-recreate app
 
-                    echo "App container started."
-                '''
+                        echo "App container started."
+                    '''
+                }
             }
         }
 

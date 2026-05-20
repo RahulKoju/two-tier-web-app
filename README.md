@@ -63,15 +63,19 @@ The `docker-compose.yml` file defines three containerized services: `app` for th
 
 ## Docker Image Naming Strategy
 
-`two-tier-web-app:latest` is the active application image used by Docker Compose, while `two-tier-web-app:<BUILD_NUMBER>` is the versioned Jenkins tag used for traceability and rollback. The `app` and `migrate` services both use the same application image so the code used for migrations and the code used for the running site stay aligned.
+`two-tier-web-app:latest` is the active application image used by the `app` service, while `two-tier-web-app:<BUILD_NUMBER>` is the versioned Jenkins tag used for traceability and rollback. The `migrate` service now uses its own image tag, `two-tier-web-app:migrator`, built from the dedicated `migrator` stage in the project `Dockerfile`.
 
-In `docker-compose.yml`, both services must keep:
+In `docker-compose.yml`, the service image tags are:
 
 ```yaml
-image: two-tier-web-app:latest
+app:
+  image: two-tier-web-app:latest
+
+migrate:
+  image: two-tier-web-app:migrator
 ```
 
-The `build:` block remains under `app` and `migrate` so Compose can still build from the project `Dockerfile`. This image naming strategy matters because Jenkins and Docker Compose must point to the same image tag. If they do not, Jenkins can finish successfully while the live container still runs older code.
+The `build:` block remains under both services so Compose can build `app` from the default final stage and `migrate` from the `migrator` target. This image naming strategy matters because Jenkins and Docker Compose must keep the active app image aligned while still providing a dedicated migration runner that does not depend on Prisma being available in the runtime container.
 
 ## Service Responsibilities
 
@@ -79,7 +83,7 @@ The `build:` block remains under `app` and `migrate` so Compose can still build 
 
 The app container is built from the project `Dockerfile` with a multi-stage build that uses a `builder` stage and a slim `runner` stage. It installs dependencies with `pnpm` in the build stage, generates the Prisma client during image build, and builds the production Next.js application as a standalone server during image build.
 
-The runtime image copies only the standalone server output, static assets, `public/`, Prisma runtime assets, and Prisma schema. It receives a container healthcheck that probes `http://localhost:3000/api/health`, starts through `scripts/start.sh`, runs `node server.js`, listens on container port `3000`, and is published on host port `3001` through `3001:3000`. It uses `NODE_ENV=production`, `NODE_OPTIONS=--max-old-space-size=512`, and Compose resource limits of `600m` memory and `1.0` CPU.
+The runtime image copies only the standalone server output, static assets, Prisma runtime assets, and Prisma schema. The `public/` copy line is currently disabled in `Dockerfile`. It receives a container healthcheck that probes `http://localhost:3000/api/health` through a small Node.js HTTP request, starts through `scripts/start.sh`, runs `node server.js`, listens on container port `3000`, and is published on host port `3001` through `3001:3000`. It uses `NODE_ENV=production`, `NODE_OPTIONS=--max-old-space-size=512`, `HOSTNAME=0.0.0.0`, and Compose resource limits of `600m` memory and `1.0` CPU.
 
 ### DB Container
 
@@ -101,13 +105,13 @@ pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
 
 ### Migrate Container
 
-The migrate container uses the same application image as `app`, `two-tier-web-app:latest`, and runs:
+The migrate container uses the dedicated image tag `two-tier-web-app:migrator`, built from the `migrator` Dockerfile stage, and runs:
 
 ```bash
-npx prisma migrate deploy
+prisma migrate deploy
 ```
 
-It connects to PostgreSQL through the Docker DNS hostname `db`, starts only after the database healthcheck reports healthy, and exits after migrations complete.
+It packages the Prisma CLI, Prisma engines, schema, and Prisma config copied from the builder stage. It connects to PostgreSQL through the Docker DNS hostname `db`, starts only after the database healthcheck reports healthy, and exits after migrations complete.
 
 ## Container Architecture
 
@@ -143,7 +147,7 @@ TLS assets are managed by Certbot:
 1. Build the application image:
 
 ```bash
-docker compose build app
+docker compose build --no-cache app
 docker tag two-tier-web-app:latest two-tier-web-app:<tag>
 ```
 
@@ -177,7 +181,7 @@ docker compose ps
 
 ### Automated CI/CD Flow
 
-Git push updates the repository tracked by Jenkins, and Jenkins checks out the latest source. It creates a runtime `.env` file from stored credentials, builds the Compose `app` image, which produces `two-tier-web-app:latest`, and tags that image as `two-tier-web-app:<BUILD_NUMBER>`. Jenkins then starts the database container, waits until PostgreSQL reaches Docker health status `healthy`, runs the migration container, and force-recreates only the `app` container with Docker Compose.
+Git push updates the repository tracked by Jenkins, and Jenkins checks out the latest source. It creates a runtime `.env` file from stored credentials, builds the Compose `app` image with `--no-cache`, which produces `two-tier-web-app:latest`, and tags that image as `two-tier-web-app:<BUILD_NUMBER>`. Jenkins then starts the database container, waits until PostgreSQL reaches Docker health status `healthy`, runs the dedicated migration container, and force-recreates only the `app` container with Docker Compose.
 
 After deployment, Jenkins waits until the app container healthcheck reports healthy and verifies the resulting Compose state. If deployment verification fails, Jenkins retags the last known-good image as `latest` and recreates the app through Docker Compose.
 
@@ -200,15 +204,15 @@ This stage reads the Jenkins credentials `POSTGRES_USER`, `POSTGRES_PASSWORD`, a
 This stage runs:
 
 ```bash
-docker compose build app
+docker compose build --no-cache app
 docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${IMAGE_TAG}
 ```
 
-It builds the `app` service image from the repository `Dockerfile`, uses a multi-stage build on `node:22-alpine`, produces `two-tier-web-app:latest` through the Compose build, tags that built image with the current Jenkins `BUILD_NUMBER`, keeps the Compose runtime image and the Jenkins-tagged image aligned, and prints matching Docker images for verification.
+It builds the `app` service image from the repository `Dockerfile`, uses a multi-stage build on `node:22-alpine`, bypasses Docker layer cache for that build, produces `two-tier-web-app:latest` through the Compose build, tags that built image with the current Jenkins `BUILD_NUMBER`, keeps the Compose runtime image and the Jenkins-tagged image aligned, and prints matching Docker images for verification.
 
 ### Run Migrations
 
-This stage starts the database container:
+This stage is wrapped in Jenkins credentials so Compose can resolve the runtime database variables before starting containers. It starts the database container:
 
 ```bash
 docker compose up -d db
@@ -228,7 +232,7 @@ docker compose run --rm migrate
 
 ### Deploy
 
-This stage runs:
+This stage is also wrapped in Jenkins credentials so the `app` service receives the constructed `DATABASE_URL`. It runs:
 
 ```bash
 docker compose up -d --no-deps --force-recreate app
@@ -256,9 +260,9 @@ On success, the pipeline prints `Deployment successful!`, records `${IMAGE_NAME}
 
 ## Runtime Behavior
 
-The Docker image is built once per deployment cycle. During image build, dependencies are installed with `pnpm install --frozen-lockfile`, project files are copied in, Prisma client is generated, Next.js production build is created with standalone output enabled, and the final runtime image receives only the standalone server, static assets, `public/`, and Prisma runtime files.
+The Docker image is built once per deployment cycle. During image build, dependencies are installed with `pnpm install --frozen-lockfile`, project files are copied in, Prisma client is generated, Next.js production build is created with standalone output enabled, the dedicated `migrator` stage is prepared with Prisma CLI assets, and the final runtime image receives only the standalone server, static assets, and Prisma runtime files.
 
-During runtime, `db` starts and initializes PostgreSQL if the volume does not already contain data, Compose waits for the `db` healthcheck before allowing dependent services to proceed, `migrate` runs only when explicitly invoked by the deployment flow, and `app` starts with `node server.js` through `scripts/start.sh`. Docker marks the app healthy only after `/api/health` returns HTTP 200, Docker log rotation keeps app logs capped at `10m` per file with `3` retained files, and Nginx serves HTTPS and forwards requests to the app on `localhost:3001`.
+During runtime, `db` starts and initializes PostgreSQL if the volume does not already contain data, Compose waits for the `db` healthcheck before allowing dependent services to proceed, `migrate` runs only when explicitly invoked by the deployment flow, and `app` starts with `node server.js` through `scripts/start.sh` while binding through `HOSTNAME=0.0.0.0`. Docker marks the app healthy only after the Node-based healthcheck receives HTTP 200 from `/api/health`, Docker log rotation keeps app logs capped at `10m` per file with `3` retained files, and Nginx serves HTTPS and forwards requests to the app on `localhost:3001`.
 
 The application becomes publicly available only after the app container is running, port `3001` is bound on the host, and Nginx is serving the domain over HTTPS.
 
@@ -286,7 +290,7 @@ The `db` service uses `restart: unless-stopped`, so Docker restarts the containe
 
 ## App Healthcheck
 
-`GET /api/health` is the application readiness endpoint. It returns `200` when the Next.js server is reachable and Prisma can execute `SELECT 1` against PostgreSQL. It returns `503` when the app process is running but database connectivity fails. Docker Compose uses this endpoint for the `app` container healthcheck.
+`GET /api/health` is the application readiness endpoint. It returns `200` when the Next.js server is reachable and Prisma can execute `SELECT 1` against PostgreSQL. It returns `503` when the app process is running but database connectivity fails. Docker Compose uses this endpoint for the `app` container healthcheck through a Node.js inline HTTP request rather than `wget`.
 
 ## Manual Failure Drills
 
@@ -374,6 +378,7 @@ Jenkins deploys versioned images using the current `BUILD_NUMBER` and retains `l
 | `DATABASE_URL` | `app` and `migrate` service environment in `docker-compose.yml`; local development example in `.env.example` | Constructed by Docker Compose for `app` and `migrate`; manually defined in `.env.example` for local development | PostgreSQL connection string used by the application runtime and Prisma migration runner. |
 | `NODE_ENV` | `app` service environment; runtime image environment | `docker-compose.yml` and the runtime image | Runs the application in production mode. |
 | `NODE_OPTIONS` | `app` service environment | `docker-compose.yml` | Sets Node.js runtime memory options with `--max-old-space-size=512`. |
+| `HOSTNAME` | `app` service environment | `docker-compose.yml` | Binds the Next.js server to `0.0.0.0` so it is reachable from outside the container. |
 
 ## Build Inputs
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 echo "Starting Next.js..."
-exec pnpm start
+exec node server.js

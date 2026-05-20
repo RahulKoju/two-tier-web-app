@@ -48,7 +48,12 @@ pipeline {
 
         stage('Run Migrations') {
             steps {
-                sh '''
+                withCredentials([
+                    string(credentialsId: 'POSTGRES_USER', variable: 'POSTGRES_USER'),
+                    string(credentialsId: 'POSTGRES_PASSWORD', variable: 'POSTGRES_PASSWORD'),
+                    string(credentialsId: 'POSTGRES_DB', variable: 'POSTGRES_DB')
+                ]) {
+                    sh '''
                     echo "Starting database..."
                     docker compose up -d db
 
@@ -87,6 +92,7 @@ pipeline {
                     echo "Running Prisma migrations..."
                     docker compose run --rm migrate
                 '''
+                }
             }
         }
 

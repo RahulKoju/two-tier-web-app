@@ -8,6 +8,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { TaskRecord } from "@/types/task";
 
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeZone: "UTC",
+});
+
 type TaskItemProps = {
   task: TaskRecord;
 };
@@ -63,11 +68,14 @@ export function TaskItem({ task }: TaskItemProps) {
           </p>
 
           {task.description ? (
-            <p className="text-sm leading-6 text-slate-600">{task.description}</p>
+            <div
+              className="task-description text-sm leading-6 text-slate-600"
+              dangerouslySetInnerHTML={{ __html: task.description }}
+            />
           ) : null}
 
           <p className="text-xs text-slate-400">
-            Created {new Date(task.createdAt).toLocaleDateString()}
+            Created {dateFormatter.format(new Date(task.createdAt))}
           </p>
 
           {error ? (

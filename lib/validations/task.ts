@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getDescriptionTextContent, normalizeDescriptionInput } from "@/lib/rich-text";
 
 export const createTaskSchema = z.object({
   title: z
@@ -12,10 +13,15 @@ export const createTaskSchema = z.object({
         return undefined;
       }
 
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
+      return normalizeDescriptionInput(value);
     },
-    z.string().max(500, "Description must be 500 characters or fewer.").optional(),
+    z
+      .string()
+      .refine(
+        (value) => getDescriptionTextContent(value).length <= 500,
+        "Description must be 500 characters or fewer.",
+      )
+      .optional(),
   ),
 });
 
@@ -24,4 +30,5 @@ export const taskIdSchema = z.string().uuid("Invalid task identifier.");
 export const taskActionStateSchema = z.object({
   success: z.boolean(),
   error: z.string().optional(),
+  resetToken: z.string().optional(),
 });

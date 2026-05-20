@@ -53,6 +53,8 @@ PostgreSQL does not need to be installed on the host because the data tier runs 
 
 This system runs as a two-tier deployment with a web/application tier and a data tier. The web tier is a Next.js 16 App Router application in Docker, and the data tier is PostgreSQL 16 in Docker with persistent storage. The application serves the task management UI and server-side data operations, while Prisma connects the Next.js server runtime to PostgreSQL.
 
+The task creation form includes a small rich text description editor. Descriptions support bold text, italic text, bullet lists, numbered lists, and links, and the formatted content is stored safely in the existing task description field.
+
 Jenkins builds and deploys the containers, Nginx terminates HTTPS and forwards traffic to the application container, and systemd restores the Docker deployment after server reboot.
 
 ## Deployment Architecture

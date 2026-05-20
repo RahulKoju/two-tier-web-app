@@ -12,6 +12,7 @@ import {
 export type TaskActionState = {
   success: boolean;
   error?: string;
+  resetToken?: string;
 };
 
 export async function createTask(
@@ -43,7 +44,12 @@ export async function createTask(
   }
 
   revalidatePath("/");
-  return taskActionStateSchema.parse({ success: true });
+  return taskActionStateSchema.parse({
+    success: true,
+    // Native form reset does not clear Tiptap state, so the client uses a new token
+    // to detect a successful submit and clear the editor exactly once.
+    resetToken: crypto.randomUUID(),
+  });
 }
 
 export async function toggleTask(

@@ -35,7 +35,7 @@ pipeline {
             steps {
                  sh '''
                     echo "Building Docker image with Docker Compose..."
-                    docker compose build app
+                    docker compose build --no-cache app
 
                     echo "Tagging image..."
                     docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${IMAGE_TAG}

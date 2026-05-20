@@ -4,6 +4,8 @@ pipeline {
     environment {
         IMAGE_NAME = "two-tier-web-app"
         IMAGE_TAG = "${BUILD_NUMBER}"
+        LAST_KNOWN_GOOD_FILE = ".last-known-good-image"
+        ROLLBACK_IMAGE_FILE = ".rollback-image"
     }
 
     stages {
@@ -50,13 +52,37 @@ pipeline {
                     echo "Starting database..."
                     docker compose up -d db
 
-                    echo "Waiting for database to be ready..."
-                    until docker compose exec db pg_isready -h localhost -p 5432; do
-                        echo "DB not ready, retrying in 2s..."
-                        sleep 2
-                    done
+                    echo "Waiting for database container health..."
+                    db_container_id=$(docker compose ps -q db)
 
-                    echo "Database is ready."
+                    if [ -z "$db_container_id" ]; then
+                        echo "Database container was not created."
+                        exit 1
+                    fi
+
+                    attempts=0
+
+                    while true; do
+                        status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$db_container_id" 2>/dev/null || echo "missing")
+
+                        echo "Current db health status: $status"
+
+                        if [ "$status" = "healthy" ]; then
+                            echo "Database is healthy."
+                            break
+                        fi
+
+                        attempts=$((attempts + 1))
+
+                        if [ $attempts -ge 12 ]; then
+                            echo "Database failed to become healthy."
+                            docker compose logs db || true
+                            exit 1
+                        fi
+
+                        echo "Database not healthy yet, retrying in 5s..."
+                        sleep 5
+                    done
 
                     echo "Running Prisma migrations..."
                     docker compose run --rm migrate
@@ -67,6 +93,14 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh '''
+                    if [ -f "${LAST_KNOWN_GOOD_FILE}" ]; then
+                        cp "${LAST_KNOWN_GOOD_FILE}" "${ROLLBACK_IMAGE_FILE}"
+                        echo "Saved rollback target: $(cat "${ROLLBACK_IMAGE_FILE}")"
+                    else
+                        rm -f "${ROLLBACK_IMAGE_FILE}"
+                        echo "No last-known-good image marker found. Rollback target is unavailable for this run."
+                    fi
+
                     echo "Deploying app container..."
 
                     docker compose up -d --no-deps --force-recreate app
@@ -126,14 +160,18 @@ pipeline {
                     echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> .env
                     echo "POSTGRES_DB=${POSTGRES_DB}" >> .env
 
-                    PREV_IMAGE=${IMAGE_NAME}:$((${BUILD_NUMBER} - 1))
+                    if [ -f "${ROLLBACK_IMAGE_FILE}" ]; then
+                        ROLLBACK_IMAGE=$(cat "${ROLLBACK_IMAGE_FILE}")
+                    else
+                        ROLLBACK_IMAGE=""
+                    fi
 
-                    echo "Previous image candidate: $PREV_IMAGE"
+                    echo "Rollback image candidate: ${ROLLBACK_IMAGE:-none}"
 
-                    if docker image inspect $PREV_IMAGE > /dev/null 2>&1; then
-                        echo "Previous image found. Rolling back to $PREV_IMAGE"
+                    if [ -n "$ROLLBACK_IMAGE" ] && docker image inspect "$ROLLBACK_IMAGE" > /dev/null 2>&1; then
+                        echo "Rollback image found. Rolling back to $ROLLBACK_IMAGE"
 
-                        docker tag $PREV_IMAGE ${IMAGE_NAME}:latest
+                        docker tag "$ROLLBACK_IMAGE" ${IMAGE_NAME}:latest
 
                         docker compose up -d db
                         docker compose up -d --no-deps --force-recreate app
@@ -164,7 +202,7 @@ pipeline {
                             sleep 10
                         done
                     else
-                        echo "No previous image found. Cannot rollback."
+                        echo "No last-known-good image found. Cannot rollback."
                     fi
 
                     echo "Final compose status:"
@@ -179,6 +217,9 @@ pipeline {
             echo 'Deployment successful!'
 
             sh '''
+                echo "${IMAGE_NAME}:${IMAGE_TAG}" > "${LAST_KNOWN_GOOD_FILE}"
+                echo "Recorded last known good image: $(cat "${LAST_KNOWN_GOOD_FILE}")"
+
                 echo "Pruning old dangling images..."
                 docker image prune -f --filter "until=24h"
             '''

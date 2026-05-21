@@ -23,7 +23,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
+    restart: always
 
   migrate:
     image: two-tier-web-app:migrator
@@ -70,7 +70,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    restart: unless-stopped
+    restart: always
 
 volumes:
   postgres_data:
